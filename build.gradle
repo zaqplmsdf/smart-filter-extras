@@ -1,0 +1,219 @@
+plugins {
+    id 'java'
+    id 'net.neoforged.moddev' version '2.0.141'
+}
+
+version = mod_version
+group = mod_group_id
+
+base {
+    archivesName = mod_id
+}
+
+java {
+    toolchain.languageVersion = JavaLanguageVersion.of(21)
+    withSourcesJar()
+}
+
+// Opt-in only: -PuseNeoForgedMirror=true (or gradle.properties) resolves NeoForged artifacts from the
+// ForgeCDN mirror instead of maven.neoforged.net. The default is the official repository.
+if (providers.gradleProperty('useNeoForgedMirror').map { it.toBoolean() }.getOrElse(false)) {
+    repositories.all { repo ->
+        if (repo instanceof MavenArtifactRepository && repo.url.toString().startsWith('https://maven.neoforged.net/')) {
+            repo.url = repo.url.toString().replace('https://maven.neoforged.net/', 'https://neoforged.forgecdn.net/')
+            logger.lifecycle("Using NeoForged mirror for ${repo.name}: ${repo.url}")
+        }
+    }
+}
+
+repositories {
+    exclusiveContent {
+        forRepository { maven { name = 'FTB'; url = 'https://maven.ftb.dev/releases/' } }
+        filter { includeGroup 'dev.ftb.mods' }
+    }
+    exclusiveContent {
+        forRepository { maven { name = 'Architectury'; url = 'https://maven.architectury.dev/' } }
+        filter { includeGroup 'dev.architectury' }
+    }
+    exclusiveContent {
+        forRepository { maven { name = 'CurseMaven'; url = 'https://cursemaven.com' } }
+        filter { includeGroup 'curse.maven' }
+    }
+    exclusiveContent {
+        forRepository { maven { name = 'BlameJared (JEI)'; url = 'https://maven.blamejared.com/' } }
+        filter {
+            includeGroup 'mezz.jei'
+            includeGroup 'net.mezzdev.config'
+        }
+    }
+    exclusiveContent {
+        // EMI's documented repository; it currently redirects to repo.sleeping.town.
+        forRepository { maven { name = 'TerraformersMC (EMI)'; url = 'https://maven.terraformersmc.com/releases/' } }
+        filter { includeGroup 'dev.emi' }
+    }
+    mavenCentral()
+}
+
+// Which recipe viewer the dev runs (client, smoke test) include: jei (default), emi or none.
+// -PrecipeViewer=emi; both are always available at compile time (API jars only).
+def recipeViewer = providers.gradleProperty('recipeViewer').getOrElse('jei')
+if (!(recipeViewer in ['jei', 'emi', 'none'])) {
+    throw new GradleException("recipeViewer must be jei, emi or none, not '${recipeViewer}'")
+}
+
+// Opt-in: -Pquests=true adds FTB Quests, FTB Teams, FTB Library and FTB XMod Compat to the dev runs.
+def withQuests = providers.gradleProperty('quests').map { it.toBoolean() }.getOrElse(false)
+
+// GameTests and the client smoke test live in their own source set: they are part of the mod in dev
+// runs, but never end up in the distributed jar.
+sourceSets {
+    gametest {
+        compileClasspath += sourceSets.main.output
+        runtimeClasspath += sourceSets.main.output
+    }
+}
+
+configurations {
+    // Mods that should be present in dev runs only (not compile dependencies, not published).
+    localRuntime
+    runtimeClasspath.extendsFrom localRuntime
+    gametestImplementation.extendsFrom implementation
+    gametestCompileOnly.extendsFrom compileOnly
+    gametestRuntimeClasspath.extendsFrom localRuntime
+}
+
+dependencies {
+    implementation("dev.ftb.mods:ftb-filter-system-neoforge:${ffs_version}") {
+        // FFS declares a JEI runtime dependency; the dev runs use the JEI version below instead.
+        exclude group: 'mezz.jei'
+    }
+    implementation "dev.architectury:architectury-neoforge:${architectury_version}"
+
+    // Optional JEI and EMI integrations: compiled against their APIs only. Neither is required at runtime.
+    compileOnly "mezz.jei:jei-${minecraft_version}-neoforge-api:${jei_version}"
+    compileOnly "dev.emi:emi-neoforge:${emi_version}:api"
+    if (recipeViewer == 'jei') {
+        localRuntime "mezz.jei:jei-${minecraft_version}-neoforge:${jei_version}"
+    } else if (recipeViewer == 'emi') {
+        localRuntime "dev.emi:emi-neoforge:${emi_version}"
+    }
+    // Optional pinyin search: Just Enough Characters (MIT), used reflectively. Dev runs only.
+    localRuntime "curse.maven:just-enough-characters-250702:${jech_curse_file_id}"
+
+    // FTB Quests item tasks that use a smart filter (tests only, never a dependency of the mod). The quest
+    // GameTests compile against FTB Quests always and skip themselves unless it is loaded.
+    // Not transitive: FTB XMod Compat's POM lists every mod it can integrate with (Curios, Patchouli, ...).
+    gametestCompileOnly("dev.ftb.mods:ftb-quests-neoforge:${ftb_quests_version}") { transitive = false }
+    gametestCompileOnly("dev.ftb.mods:ftb-teams-neoforge:${ftb_teams_version}") { transitive = false }
+    gametestCompileOnly("dev.ftb.mods:ftb-library-neoforge:${ftb_library_quests_version}") { transitive = false }
+    if (withQuests) {
+        localRuntime("dev.ftb.mods:ftb-quests-neoforge:${ftb_quests_version}") { transitive = false }
+        localRuntime("dev.ftb.mods:ftb-teams-neoforge:${ftb_teams_version}") { transitive = false }
+        localRuntime("dev.ftb.mods:ftb-library-neoforge:${ftb_library_quests_version}") { transitive = false }
+        localRuntime("dev.ftb.mods:ftb-xmod-compat-neoforge:${ftb_xmod_compat_version}") { transitive = false }
+    }
+}
+
+neoForge {
+    version = neoforge_version
+
+    parchment {
+        mappingsVersion = parchment_mappings_version
+        minecraftVersion = parchment_minecraft_version
+    }
+
+    addModdingDependenciesTo sourceSets.gametest
+
+    mods {
+        "${mod_id}" {
+            sourceSet sourceSets.main
+            sourceSet sourceSets.gametest
+        }
+    }
+
+    runs {
+        configureEach {
+            sourceSet = sourceSets.gametest
+            logLevel = org.slf4j.event.Level.INFO
+        }
+        client {
+            client()
+            gameDirectory = file('runs/client')
+        }
+        server {
+            server()
+            programArgument '--nogui'
+            gameDirectory = file('runs/server')
+        }
+        gameTestServer {
+            type = 'gameTestServer'
+            gameDirectory = file('runs/gametest')
+            systemProperty 'neoforge.enabledGameTestNamespaces', mod_id
+        }
+        // Automated client check: creates a superflat world, drives the config screens with synthetic
+        // mouse input, writes results to runs/client-smoke/smoke-result.json and quits.
+        clientSmoke {
+            client()
+            gameDirectory = file('runs/client-smoke')
+            systemProperty 'smart_filter_extras.clientSmoke', 'true'
+        }
+    }
+}
+
+def tomlProperties = [
+        mod_id                     : mod_id,
+        mod_name                   : mod_name,
+        mod_version                : project.version,
+        neoforge_version_range     : neoforge_version_range,
+        minecraft_version_range    : minecraft_version_range,
+        ffs_version_range          : ffs_version_range,
+        architectury_version_range : architectury_version_range,
+]
+
+processResources {
+    // mods.toml holds the author's name in Chinese: read and write it as UTF-8 whatever the platform default is.
+    filteringCharset = 'UTF-8'
+    inputs.properties(tomlProperties)
+    filesMatching('META-INF/neoforge.mods.toml') {
+        expand tomlProperties
+    }
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+    options.release = 21
+    options.compilerArgs.addAll(['-Xlint:deprecation', '-Xlint:unchecked'])
+}
+
+// The MIT license asks for its notice to travel with every copy, so both jars carry it.
+tasks.named('jar') { from('LICENSE') { rename { "LICENSE_${mod_id}" } } }
+tasks.named('sourcesJar') { from('LICENSE') { rename { "LICENSE_${mod_id}" } } }
+
+// Kept here rather than in gradle.properties, which Gradle reads as ISO-8859-1 (no Chinese characters there).
+def modAuthor = '传送门方块'
+
+jar {
+    manifest {
+        attributes([
+                'Specification-Title'     : mod_id,
+                'Specification-Vendor'    : modAuthor,
+                'Specification-Version'   : '1',
+                'Implementation-Title'    : mod_name,
+                'Implementation-Version'  : project.version,
+                'Implementation-Vendor'   : modAuthor
+        ])
+    }
+}
+
+// Writes a SHA-256 file next to each distributable jar so releases can be verified.
+tasks.register('checksums') {
+    dependsOn tasks.named('jar'), tasks.named('sourcesJar')
+    def libs = layout.buildDirectory.dir('libs')
+    doLast {
+        libs.get().asFile.listFiles().findAll { it.name.endsWith('.jar') }.each { jarFile ->
+            def digest = java.security.MessageDigest.getInstance('SHA-256').digest(jarFile.bytes)
+            new File(jarFile.parentFile, jarFile.name + '.sha256').text = digest.encodeHex().toString() + '  ' + jarFile.name + '\n'
+        }
+    }
+}
+tasks.named('build') { dependsOn tasks.named('checksums') }

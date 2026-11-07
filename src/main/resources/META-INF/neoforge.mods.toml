@@ -1,0 +1,50 @@
+modLoader = "javafml"
+loaderVersion = "[4,)"
+license = "MIT"
+
+[[mods]]
+modId = "${mod_id}"
+version = "${mod_version}"
+displayName = "${mod_name}"
+logoFile = "smart_filter_extras_logo.png"
+logoBlur = false
+authors = "传送门方块"
+description = '''
+Unofficial addon for FTB Filter System: an "Item List" filter that matches any of many items, an "Item Tags" filter for several item tags, a "Block Tag" filter and a "Fuel Value" filter.
+Not affiliated with or endorsed by FTB Team.
+'''
+
+[[dependencies.${mod_id}]]
+modId = "neoforge"
+type = "required"
+versionRange = "${neoforge_version_range}"
+ordering = "NONE"
+side = "BOTH"
+
+[[dependencies.${mod_id}]]
+modId = "minecraft"
+type = "required"
+versionRange = "${minecraft_version_range}"
+ordering = "NONE"
+side = "BOTH"
+
+[[dependencies.${mod_id}]]
+modId = "ftbfiltersystem"
+type = "required"
+versionRange = "${ffs_version_range}"
+ordering = "AFTER"
+side = "BOTH"
+
+[[dependencies.${mod_id}]]
+modId = "architectury"
+type = "required"
+versionRange = "${architectury_version_range}"
+ordering = "AFTER"
+side = "BOTH"
+
+[[dependencies.${mod_id}]]
+modId = "jei"
+type = "optional"
+versionRange = "[19.5.0.40,20)"
+ordering = "NONE"
+side = "CLIENT"
